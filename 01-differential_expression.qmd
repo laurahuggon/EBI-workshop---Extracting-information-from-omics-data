@@ -45,7 +45,7 @@ When you try to push your changes RStudio will probably prompt you for your GitH
 library(gitcreds)
 library(usethis)
 # Give Git your name and email to sign your commits
-usethis::use_git_config(user.name = "Jane Doe", user.email = "jane@example.org")
+usethis::use_git_config(user.name = "laurahuggon", user.email = "laura.huggon@kcl.ac.uk")
 # Make a pat token to be able to push to github recommended setting are "user" 
 # "repo" and "workflow", which should be enabled by default
 usethis::create_github_token()
@@ -60,7 +60,7 @@ gitcreds::gitcreds_set()
 
 And paste the token in. You should be able to make pushes to your forked repo now (hopefully!) Refer to the excellent [Happy Git with R](https://happygitwithr.com/https-pat) guide if needed or for more info.
 
-## Load the RNA-Seq data
+## Load the (bulk) RNA-Seq data
 
 We already pre-processed the RNA-Seq and ATAC-Seq data using nf-core/fetchngs, nf-core/rnaseq and nf-core/atacseq. We looked at the MultiQC reports to get an initial idea of the quality of the data.\
 
@@ -113,6 +113,7 @@ ggplot(pcaData, aes(PC1, PC2, color=condition)) +
 We were worried about cell stress pathways as these samples were collected directly after FACs sorting. Let's look at highly expressed genes in each condition and see if these are enriched in stress-related GO terms.
 
 ```{r}
+# select top 300 genes
 select <- order(rowMeans(counts(dds,normalized=TRUE)),
                 decreasing=TRUE)[1:300]
 top300 <- as.data.frame(assay(ntd)[select,])
@@ -143,6 +144,8 @@ enrichplot::dotplot(gp_mod_enrich)
 
 #### **Q) What do you think? Do our cells seem stressed?**
 
+*No - stress pathways not upregulated.*
+
 Now lets look for genes enriched in brain endothelial cells compared to lung or liver...
 
 ```{r}
@@ -155,6 +158,7 @@ We want genes that are overexpressed in brain compared to both lung and liver. I
 What kind of thresholds should we use for log2FoldChange and adjusted p value? Another visualization can help us to decide, let's have a look at volcano plots for both comparisons..\
 
 ```{r}
+# values that determine what genes are considered "differentially expressed"
 foldchange=0.5
 pval=0.05
 
@@ -213,6 +217,10 @@ PlotVolcano("condition_LV_vs_BR")
 
 #### **Q) Do these thresholds seem reasonable?**
 
+*These values are what are normally used.*
+
+*The actual paper used more stringent values as they have so many deferentially expressed genes.*
+
 Let's look at genes that are overexpressed in brain compared to both lung and liver. We will perform the GO analysis again to see what kind of gene networks they are a part of.\
 
 ```{r}
@@ -225,7 +233,9 @@ brainlung = lfcShrink(dds, coef="condition_LG_vs_BR", type="apeglm") %>%
   filter(padj<0.001 & log2FoldChange <= -2) %>%
   rownames()
 
+# enriched in brain vs lung
 length(brainlung)
+# enriched in brain vs liver
 length(brainliver)
 
 # get genes that appear in both lists
@@ -264,7 +274,7 @@ row.names(gp_mod) = gp_mod$ID
 # define as enrichResult object
 gp_mod_enrich  = new("enrichResult", result = gp_mod)
 gp_mod
-barplot(gp_mod_enrich, showCategory = 40, font.size = 16) + 
+barplot(gp_mod_enrich, showCategory = 40, font.size = 4) + 
   ggplot2::facet_grid(~Cluster) +
   ggplot2::ylab("Intersection size")
 ```
@@ -284,6 +294,7 @@ Extra arguments are passed in the args variable which in pipelines is usually se
 In the nextflow module code we can see the version of HOMER used is homer=4.11 - so we have used whatever the default params are for HOMER v.4.11. We can learn about these by reading HOMER annotatepeaks docs.
 
 ```{r}
+# peaks annotated to genes
 atac_annot = read.delim("data/count_tables/consensus_peaks.mRp.clN.annotatePeaks.txt")
 colnames(atac_annot)
 ```
@@ -297,11 +308,13 @@ ggplot(atac_annot,aes(x=Distance.to.TSS)) + geom_density() + theme_few()
 
 Some peaks seem implausibly far from genes, let's restrict to +/- 2000 nt away - how many peaks do we lose?
 
+*People tend to use 1000 nt.*
+
 ```{r}
 filt_atac_annot = atac_annot %>% filter(abs(Distance.to.TSS) <= 2000)
 ```
 
-Are any of these ATAC peaks associated with our unique brain genes?
+Are any of these ATAC peaks associated with our unique brain genes (brain_enriched) and liver_enriched?
 
 ```{r}
 filt_atac_annot = filt_atac_annot %>% mutate(brain_enriched=Entrez.ID %in% brain_enriched, liver_enriched=Entrez.ID %in% liver_enriched)
@@ -317,6 +330,7 @@ filt_atac_annot %>%
 Let's get the sequences of these ATAC peaks to see if we can identify TF(s) that might regulate our brain-specific genes.
 
 ```{r}
+# make genomic ranges
 brain_peaks = makeGRangesFromDataFrame(filt_atac_annot %>% filter(brain_enriched==TRUE), keep.extra.columns = TRUE)
 liver_peaks = makeGRangesFromDataFrame(filt_atac_annot %>% filter(liver_enriched==TRUE), keep.extra.columns = TRUE)
 ```
@@ -332,12 +346,16 @@ Let's take them as they are for now, but might be worth resizing to make them sh
 Let's merge overlapping peaks - do we have any?
 
 ```{r}
+# check for overlapping peaks
 length(brain_peaks)
 brain_peaks = GenomicRanges::reduce(brain_peaks)
 length(brain_peaks)
 ```
 
-(We could resize our peaks at this point but in the manuscript they don't)\
+*Length is the same before vs after - so, no.*
+
+(We could resize our peaks at this point but in the manuscript they don't).\
+
 Here we load the mouse genome, then get sequences.
 
 ```{r}
@@ -365,6 +383,7 @@ dreme_out
 ```
 
 ```{r}
+# convert format of motif to plots
 #| eval: true
 dreme_out$motif %>% 
   purrr::map(universalmotif::view_motifs) %>% 
@@ -374,10 +393,10 @@ dreme_out$motif %>%
       theme(plot.title = element_text(hjust = 0.5, size = 14))
   }) %>% 
   patchwork::wrap_plots(ncol = 2) 
-
 ```
 
 ```{r}
+# what TF does that motif represent?
 #| eval: true
 # convert the top motif to a PWM matrix
 unknown_pwm   = convert_motifs(dreme_out$motif[[1]],"TFBSTools-PWMatrix")
@@ -419,13 +438,15 @@ pwm_library_dt = pwm_library_dt[order(-pwm_library_dt$similarity),]
 head(pwm_library_dt)
 ```
 
-Is Nfe2l2/Nrf2 brain-specific in our RNA-Seq data?
+Is Nfe2l2/Nrf2 transcription factor brain-specific in our RNA-Seq data?
 
 ```{r}
 #| eval: true
 as.data.frame(assay(ntd)) %>%
   filter(row.names(as.data.frame(assay(ntd))) %in% c("ENSMUSG00000015839"))
 ```
+
+*It is highly expressed in the brain, but also in the lung and liver.*
 
 Maybe Nrf2 is important for blood brain barrier integrity -\> <https://www.jneurosci.org/content/27/38/10240.short>
 
